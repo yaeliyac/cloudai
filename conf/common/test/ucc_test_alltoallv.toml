@@ -1,0 +1,9 @@
+name = "ucc_test_alltoallv"
+description = "alltoallv"
+test_template_name = "UCCTest"
+
+extra_container_mounts = ["/mtrsysgwork/yyacobovich/install/all2allv/transfer_matrices/09_07_25_new_format:/workspace/ucc_transfer_matrices_new"]
+
+[cmd_args]
+docker_image_url = "gitlab-master.nvidia.com/yyacobovich/my_containers:ucc_a2av_new_v3"
+collective = "alltoallv"

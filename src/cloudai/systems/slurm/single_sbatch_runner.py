@@ -21,11 +21,12 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Generator, Optional, cast
 
+from cloudai.configurator.cloudai_gym import CloudAIGymEnv
 from cloudai.core import JobIdRetrievalError, System, TestRun, TestScenario
-from cloudai.systems.slurm.slurm_metadata import SlurmJobMetadata, SlurmStepMetadata
 from cloudai.util import CommandShell, format_time_limit, parse_time_limit
 
 from .slurm_command_gen_strategy import SlurmCommandGenStrategy
+from .slurm_metadata import SlurmJobMetadata, SlurmStepMetadata
 from .slurm_runner import SlurmJob, SlurmRunner
 from .slurm_system import SlurmSystem
 
@@ -56,7 +57,7 @@ class SingleSbatchRunner(SlurmRunner):
             batch_script_content.append(f"#SBATCH --account={self.system.account}")
         if self.system.distribution:
             batch_script_content.append(f"#SBATCH --distribution={self.system.distribution}")
-        if self.system.gpus_per_node:
+        if self.system.gpus_per_node and self.system.supports_gpu_directives:
             batch_script_content.append(f"#SBATCH --gpus-per-node={self.system.gpus_per_node}")
             batch_script_content.append(f"#SBATCH --gres=gpu:{self.system.gpus_per_node}")
         if self.system.ntasks_per_node:
@@ -133,10 +134,10 @@ class SingleSbatchRunner(SlurmRunner):
                 yield next_tr
 
     def get_global_env_vars(self) -> str:
-        vars: list[str] = []
+        vars: list[str] = ["export SLURM_JOB_MASTER_NODE=$(scontrol show hostname $SLURM_JOB_NODELIST | head -n 1)"]
         tr = self.test_scenario.test_runs[0]
-        env_vars = self.system.global_env_vars | tr.test.test_definition.extra_env_vars
-        for key, value in env_vars.items():
+        cmd_gen = cast(SlurmCommandGenStrategy, self.get_cmd_gen_strategy(self.system, tr))
+        for key, value in cmd_gen.final_env_vars.items():
             vars.append(f"export {key}={value}")
         return "\n".join(vars)
 
@@ -194,7 +195,24 @@ class SingleSbatchRunner(SlurmRunner):
             is_completed = True if self.mode == "dry-run" else self.system.is_job_completed(job)
             await asyncio.sleep(self.system.monitor_interval)
 
+        self.handle_dse()
+
         self.on_job_completion(job)
+
+    def handle_dse(self):
+        for tr in self.test_scenario.test_runs:
+            if not tr.is_dse_job:
+                continue
+
+            for idx, combination in enumerate(tr.all_combinations, start=1):
+                next_tr = tr.apply_params_set(combination)
+                next_tr.step = idx
+                next_tr.output_path = self.get_job_output_path(next_tr)
+
+                gym = CloudAIGymEnv(next_tr, self)
+                observation = gym.get_observation({})
+                reward = gym.compute_reward(observation)
+                gym.write_trajectory(idx, combination, reward, observation)
 
     def _submit_test(self, tr: TestRun) -> SlurmJob:
         with open(self.scenario_root / "cloudai_sbatch_script.sh", "w") as f:

@@ -19,6 +19,7 @@ import re
 from typing import Generator, cast
 from unittest.mock import Mock
 
+import pandas as pd
 import pytest
 import toml
 
@@ -75,20 +76,30 @@ def sleep_tr(slurm_system: SlurmSystem) -> TestRun:
     return tr
 
 
-def test_sbatch_default(sleep_tr: TestRun, slurm_system: SlurmSystem) -> None:
+@pytest.mark.parametrize("gres_support", [True, False])
+def test_sbatch_default(sleep_tr: TestRun, slurm_system: SlurmSystem, gres_support: bool) -> None:
     tc = TestScenario(name="tc", test_runs=[sleep_tr])
     runner = SingleSbatchRunner(mode="run", system=slurm_system, test_scenario=tc, output_path=slurm_system.output_path)
 
-    sbatch_lines = runner.get_sbatch_directives()
-    assert sbatch_lines == [
+    runner.system.supports_gpu_directives_cache = gres_support
+
+    expected = [
         f"#SBATCH -N {sleep_tr.num_nodes}",
         f"#SBATCH --job-name={runner.job_name}",
         f"#SBATCH --output={runner.scenario_root.absolute() / 'common.out'}",
         f"#SBATCH --error={runner.scenario_root.absolute() / 'common.err'}",
         f"#SBATCH --partition={slurm_system.default_partition}",
-        f"#SBATCH --gpus-per-node={slurm_system.gpus_per_node}",
-        f"#SBATCH --gres=gpu:{slurm_system.gpus_per_node}",
     ]
+    if gres_support:
+        expected.extend(
+            [
+                f"#SBATCH --gpus-per-node={slurm_system.gpus_per_node}",
+                f"#SBATCH --gres=gpu:{slurm_system.gpus_per_node}",
+            ]
+        )
+
+    sbatch_lines = runner.get_sbatch_directives()
+    assert sbatch_lines == expected
 
 
 def test_sbatch_system_fields(sleep_tr: TestRun, slurm_system: SlurmSystem) -> None:
@@ -525,3 +536,19 @@ def test_pre_test(nccl_tr: TestRun, sleep_tr: TestRun, slurm_system: SlurmSystem
             "",
         ]
     )
+
+
+def test_trajectory_saved(dse_tr: TestRun, slurm_system: SlurmSystem) -> None:
+    tc = TestScenario(name="tc", test_runs=[dse_tr])
+    runner = SingleSbatchRunner(mode="run", system=slurm_system, test_scenario=tc, output_path=slurm_system.output_path)
+    dse_tr.output_path = slurm_system.output_path / dse_tr.name
+    dse_tr.output_path.mkdir(parents=True, exist_ok=True)
+
+    trajectory_path = runner.scenario_root / dse_tr.name / f"{dse_tr.current_iteration}" / "trajectory.csv"
+    trajectory_path.unlink(missing_ok=True)
+    runner.handle_dse()
+
+    assert trajectory_path.exists()
+    df = pd.read_csv(trajectory_path)
+    assert df.shape[0] == len(dse_tr.all_combinations)
+    assert df["step"].tolist() == list(range(1, len(dse_tr.all_combinations) + 1))

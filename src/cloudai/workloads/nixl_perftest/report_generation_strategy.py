@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: NVIDIA CORPORATION & AFFILIATES
-# Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,25 +14,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name = "nemo_launcher"
-[[Tests]]
-id = "Tests.1"
-test_name = "gpt3_40b"
-num_nodes = "4"
+from typing import ClassVar
 
-[[Tests]]
-id = "Tests.2"
-test_name = "gpt3_40b"
-num_nodes = "4"
-  [[Tests.dependencies]]
-  type = "start_post_comp"
-  id = "Tests.1"
+from cloudai.core import ReportGenerationStrategy
 
 
-[[Tests]]
-id = "Tests.3"
-test_name = "gpt3_40b"
-num_nodes = "4"
-  [[Tests.dependencies]]
-  type = "start_post_comp"
-  id = "Tests.2"
+class NIXLKVBenchDummyReport(ReportGenerationStrategy):
+    """Dummy report to support sweeps as it requires "default" metric."""
+
+    metrics: ClassVar[list[str]] = ["default"]
+
+    def can_handle_directory(self) -> bool:
+        return True
+
+    def generate_report(self) -> None:
+        pass

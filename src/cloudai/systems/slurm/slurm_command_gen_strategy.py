@@ -321,26 +321,12 @@ class SlurmCommandGenStrategy(CommandGenStrategy):
             ]
         )
 
-    def _enable_numa_control_cmd(self) -> str:
-        return " ".join(
-            [
-                "srun",
-                f"--mpi={self.system.mpi}",
-                "numactl",
-                "--cpunodebind=$((SLURM_LOCALID/4))",
-                "--membind=$((SLURM_LOCALID/4))",
-            ]
-        )
-
     def _write_sbatch_script(self, srun_command: str) -> str:
         """
         Write the batch script for Slurm submission and return the sbatch command.
 
         Args:
-            slurm_args (Dict[str, Any]): Slurm-specific arguments.
-            env_vars (Dict[str, Union[str, List[str]]]): Environment variables.
             srun_command (str): srun command.
-            tr (TestRun): Test run object.
 
         Returns:
             str: sbatch command to submit the job.
@@ -357,8 +343,6 @@ class SlurmCommandGenStrategy(CommandGenStrategy):
 
         if self.final_env_vars.get("ENABLE_VBOOST") == "1":
             batch_script_content.extend([self._enable_vboost_cmd(), ""])
-        if self.final_env_vars.get("ENABLE_NUMA_CONTROL") == "1":
-            batch_script_content.extend([self._enable_numa_control_cmd(), ""])
         batch_script_content.extend([self._ranks_mapping_cmd(), ""])
         batch_script_content.extend([self._metadata_cmd(), ""])
 
@@ -439,8 +423,7 @@ class SlurmCommandGenStrategy(CommandGenStrategy):
             str: A string representation of the formatted environment variables.
         """
         formatted_vars = []
-        for key in sorted(env_vars.keys()):
-            value = env_vars[key]
+        for key, value in env_vars.items():
             formatted_value = str(value["default"]) if isinstance(value, dict) and "default" in value else str(value)
             formatted_vars.append(f"export {key}={formatted_value}")
         return "\n".join(formatted_vars)
@@ -466,7 +449,7 @@ class SlurmCommandGenStrategy(CommandGenStrategy):
                 self.test_run.name,
                 str(self.test_run.current_iteration),
                 str(self.test_run.step),
-                str(self.test_run.num_nodes),
+                str(self.test_run.nnodes),
                 ",".join(self.test_run.nodes),
             ]
         )

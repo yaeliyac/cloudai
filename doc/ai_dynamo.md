@@ -1,4 +1,4 @@
-## Running AI Dynamo with CloudAI
+# Running AI Dynamo with CloudAI
 CloudAI supports end-to-end inference benchmarking of large language models using [AI Dynamo](https://github.com/ai-dynamo/dynamo). This section explains how to run AI Dynamo jobs via CloudAI, beginning with setting up the environment and downloading Hugging Face model weights, and continuing through job submission and monitoring.
 
 In particular, this section will cover:
@@ -12,7 +12,7 @@ CloudAI abstracts away most of the complexity in coordinating frontend, prefill,
 
 ---
 
-### Step 1: Download Model Weights Using Hugging Face CLI
+## Step 1: Download Model Weights Using Hugging Face CLI
 
 Install the Hugging Face CLI:
 
@@ -20,24 +20,34 @@ Install the Hugging Face CLI:
 $ pip install -U "huggingface_hub[cli]"
 ```
 
+You need to create a Hugging Face account and generate an access token:
+
+1. Visit https://huggingface.co/
+2. Click "Sign Up" to create a new account
+3. Fill in your personal information and complete the registration process
+4. Go to https://huggingface.co/settings/tokens
+5. Click "+ Create new token"
+6. Name your token and select appropriate permissions
+7. Save the generated token in a secure location - you'll need it for authentication
+
 Log in using your Hugging Face token:
 
 ```bash
-$ huggingface-cli login
+$ hf login
 ```
 
 Download the model weights and tokenizer to a HF_HOME that will serve as the Hugging Face cache:
 
 ```bash
 $ export HF_HOME=/path/to/hf_home/
-$ huggingface-cli download nvidia/Llama-3.1-405B-Instruct-FP8
-$ huggingface-cli download hf-internal-testing/llama-tokenizer
+$ hf download nvidia/Llama-3.1-405B-Instruct-FP8
+$ hf download hf-internal-testing/llama-tokenizer
 ```
 
 You can verify the model cache using:
 
 ```bash
-$ huggingface-cli scan-cache -vvv
+$ hf scan-cache -vvv
 
 REPO ID                             REPO TYPE SIZE ON DISK
 ----------------------------------- --------- ------------
@@ -51,7 +61,7 @@ The path to the downloaded weights should be consistent with the structure expec
 
 ---
 
-### Step 2: Configure `huggingface_home` in the Test Schema
+## Step 2: Configure `huggingface_home` in the Test Schema
 
 Set the `huggingface_home` variable in the test schema file (e.g., `test.toml`) so that CloudAI can locate the model weights:
 
@@ -84,7 +94,7 @@ This location should point to the root directory used with `--local-dir` in the 
 
 ---
 
-### Step 3: Node Configuration for AI Dynamo
+## Step 3: Node Configuration for AI Dynamo
 
 AI Dynamo jobs use three distinct types of nodes:
 
@@ -104,7 +114,7 @@ All node role assignments and orchestration are automatically managed by CloudAI
 
 ---
 
-### Step 4: Launching and Monitoring the Job
+## Step 4: Launching and Monitoring the Job
 
 To run the job:
 
@@ -112,13 +122,13 @@ To run the job:
 $ python cloudaix.py run --system-config conf/staging/ai_dynamo/system/oci.toml --tests-dir conf/staging/ai_dynamo/test --test-scenario conf/staging/ai_dynamo/test_scenario/ai_dynamo.toml
 ```
 
-#### Option 1: Monitor via Slurm
+### Option 1: Monitor via Slurm
 
 ```bash
 $ watch squeue --me
 ```
 
-#### Option 2: Monitor Output Logs
+### Option 2: Monitor Output Logs
 
 Navigate to the results directory created by CloudAI and observe the logs:
 
@@ -129,7 +139,7 @@ $ watch tail -n 4 *.txt
 
 The frontend node will initially wait to allow weight loading on all nodes. Once ready, it will launch `genai-perf`, which begins generating requests to the frontend server. All servers cooperate to complete inference, and the output will appear in `stdout.txt`.
 
-### Step 5: Review Results
+## Step 5: Review Results
 After job completion, CloudAI will place the output logs and result files in the designated results directory. To analyze performance metrics and validate inference outcomes:
 
 - Navigate to the results directory (e.g., ./results/...)

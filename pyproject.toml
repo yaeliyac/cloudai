@@ -45,6 +45,15 @@ scripts = { cloudai = "cloudai.__main__:main" }
     "pytest-deadfixtures==2.2.*",
     "taplo==0.9.3",
   ]
+  docs = [
+    "sphinx>=7.0",
+    "nvidia-sphinx-theme",
+    "myst-parser",
+    "sphinxext-opengraph",
+    "sphinx-design",
+    "sphinxcontrib-mermaid",
+    "sphinx-copybutton>=0.5.2",
+  ]
 
 [build-system]
 requires = ["pdm-backend"]
@@ -52,7 +61,7 @@ build-backend = "pdm.backend"
 
 [tool.pdm.version]
 source = "scm"
-fallback_version = "1.3.0+unknown"
+fallback_version = "1.4.0+unknown"
 
 [tool.ruff]
 line-length = 120
@@ -107,6 +116,7 @@ root_package = "cloudai"
   name = "Report generator is leaf dependency"
   type = "forbidden"
   forbidden_modules = ["cloudai.systems", "cloudai.workloads", "cloudai.cli"]
+  allow_indirect_imports = true                                               # allow "from cloudai.core import ..."
   source_modules = ["cloudai.report_generator"]
 
   [[tool.importlinter.contracts]]

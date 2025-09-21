@@ -16,9 +16,15 @@
 
 from typing import Literal, Optional
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
-from cloudai.core import CmdArgs, DockerImage, Installable, TestDefinition
+from cloudai.core import CmdArgs, DockerImage, Installable, TestDefinition, TestRun
+
+
+class MatgenCmdArgs(CmdArgs):
+    """Command args for matgen script."""
+
+    ppn: int | None = None
 
 
 class NixlPerftestCmdArgs(CmdArgs):
@@ -53,6 +59,8 @@ class NixlPerftestCmdArgs(CmdArgs):
     num_heads: int | None = None
     num_kv_heads: int | None = None
     dtype_size: int | None = None
+
+    matgen_args: MatgenCmdArgs = Field(default_factory=MatgenCmdArgs)
 
     @model_validator(mode="after")
     def model_vs_custom(self):
@@ -98,3 +106,11 @@ class NixlPerftestTestDefinition(TestDefinition):
     @property
     def installables(self) -> list[Installable]:
         return [*self.git_repos, self.docker_image]
+
+    def constraint_check(self, tr: TestRun) -> bool:
+        decode_tp = int(tr.test.test_definition.cmd_args.decode_tp)
+        decode_nodes = int(tr.test.test_definition.cmd_args.num_decode_nodes)
+        prefill_tp = int(tr.test.test_definition.cmd_args.prefill_tp)
+        prefill_nodes = int(tr.test.test_definition.cmd_args.num_prefill_nodes)
+
+        return decode_tp / decode_nodes == prefill_tp / prefill_nodes

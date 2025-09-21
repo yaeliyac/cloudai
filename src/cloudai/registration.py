@@ -19,6 +19,9 @@ def register_all():
     """Register all workloads, systems, runners, installers, and strategies."""
     from cloudai.configurator.grid_search import GridSearchAgent
     from cloudai.configurator.reward_functions import (
+        ai_dynamo_log_scale_reward,
+        ai_dynamo_ratio_normalized_reward,
+        ai_dynamo_weighted_normalized_reward,
         identity_reward,
         inverse_reward,
         negative_reward,
@@ -61,6 +64,8 @@ def register_all():
         MegatronRunTestDefinition,
     )
     from cloudai.workloads.nccl_test import (
+        ComparisonReportConfig,
+        NcclComparisonReport,
         NCCLTestDefinition,
         NcclTestGradingStrategy,
         NcclTestKubernetesJsonGenStrategy,
@@ -81,12 +86,17 @@ def register_all():
         NeMoRunTestDefinition,
     )
     from cloudai.workloads.nixl_bench import (
+        NIXLBenchComparisonReport,
         NIXLBenchReportGenerationStrategy,
         NIXLBenchSlurmCommandGenStrategy,
-        NIXLBenchSummaryReport,
         NIXLBenchTestDefinition,
     )
-    from cloudai.workloads.nixl_perftest import NixlPerftestSlurmCommandGenStrategy, NixlPerftestTestDefinition
+    from cloudai.workloads.nixl_kvbench import NIXLKVBenchSlurmCommandGenStrategy, NIXLKVBenchTestDefinition
+    from cloudai.workloads.nixl_perftest import (
+        NIXLKVBenchDummyReport,
+        NixlPerftestSlurmCommandGenStrategy,
+        NixlPerftestTestDefinition,
+    )
     from cloudai.workloads.sleep import (
         SleepGradingStrategy,
         SleepKubernetesJsonGenStrategy,
@@ -95,11 +105,7 @@ def register_all():
         SleepStandaloneCommandGenStrategy,
         SleepTestDefinition,
     )
-    from cloudai.workloads.slurm_container import (
-        SlurmContainerCommandGenStrategy,
-        SlurmContainerReportGenerationStrategy,
-        SlurmContainerTestDefinition,
-    )
+    from cloudai.workloads.slurm_container import SlurmContainerCommandGenStrategy, SlurmContainerTestDefinition
     from cloudai.workloads.triton_inference import (
         TritonInferenceReportGenerationStrategy,
         TritonInferenceSlurmCommandGenStrategy,
@@ -160,6 +166,7 @@ def register_all():
 
     Registry().add_command_gen_strategy(SlurmSystem, AIDynamoTestDefinition, AIDynamoSlurmCommandGenStrategy)
     Registry().add_command_gen_strategy(SlurmSystem, BashCmdTestDefinition, BashCmdCommandGenStrategy)
+    Registry().add_command_gen_strategy(SlurmSystem, NIXLKVBenchTestDefinition, NIXLKVBenchSlurmCommandGenStrategy)
 
     Registry().add_installer("slurm", SlurmInstaller)
     Registry().add_installer("standalone", StandaloneInstaller)
@@ -189,6 +196,7 @@ def register_all():
     Registry().add_test_definition("AIDynamo", AIDynamoTestDefinition)
     Registry().add_test_definition("BashCmd", BashCmdTestDefinition)
     Registry().add_test_definition("NixlPerftest", NixlPerftestTestDefinition)
+    Registry().add_test_definition("NIXLKVBench", NIXLKVBenchTestDefinition)
 
     Registry().add_agent("grid_search", GridSearchAgent)
 
@@ -201,17 +209,27 @@ def register_all():
     Registry().add_report(NeMoRunTestDefinition, NeMoRunReportGenerationStrategy)
     Registry().add_report(NeMoRunTestDefinition, NeMoRunDataStoreReportGenerationStrategy)
     Registry().add_report(NemotronTestDefinition, JaxToolboxReportGenerationStrategy)
-    Registry().add_report(SlurmContainerTestDefinition, SlurmContainerReportGenerationStrategy)
     Registry().add_report(UCCTestDefinition, UCCTestReportGenerationStrategy)
     Registry().add_report(TritonInferenceTestDefinition, TritonInferenceReportGenerationStrategy)
     Registry().add_report(NIXLBenchTestDefinition, NIXLBenchReportGenerationStrategy)
     Registry().add_report(AIDynamoTestDefinition, AIDynamoReportGenerationStrategy)
+    Registry().add_report(NixlPerftestTestDefinition, NIXLKVBenchDummyReport)
 
     Registry().add_scenario_report("per_test", PerTestReporter, ReportConfig(enable=True))
     Registry().add_scenario_report("status", StatusReporter, ReportConfig(enable=True))
     Registry().add_scenario_report("tarball", TarballReporter, ReportConfig(enable=True))
-    Registry().add_scenario_report("nixl_bench_summary", NIXLBenchSummaryReport, ReportConfig(enable=True))
+    Registry().add_scenario_report(
+        "nixl_bench_summary",
+        NIXLBenchComparisonReport,
+        ComparisonReportConfig(enable=True, group_by=["backend", "op_type"]),
+    )
+    Registry().add_scenario_report(
+        "nccl_comparison", NcclComparisonReport, ComparisonReportConfig(enable=True, group_by=["subtest_name"])
+    )
 
     Registry().add_reward_function("inverse", inverse_reward)
     Registry().add_reward_function("negative", negative_reward)
     Registry().add_reward_function("identity", identity_reward)
+    Registry().add_reward_function("ai_dynamo_weighted_normalized", ai_dynamo_weighted_normalized_reward)
+    Registry().add_reward_function("ai_dynamo_ratio_normalized", ai_dynamo_ratio_normalized_reward)
+    Registry().add_reward_function("ai_dynamo_log_scale", ai_dynamo_log_scale_reward)

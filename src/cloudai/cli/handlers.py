@@ -31,6 +31,8 @@ from cloudai.core import (
     BaseInstaller,
     CloudAIGymEnv,
     Installable,
+    InstallStatusResult,
+    MissingTestError,
     Parser,
     Registry,
     Runner,
@@ -113,24 +115,34 @@ def prepare_installation(
     return installables, installer
 
 
-def handle_dse_job(runner: Runner, args: argparse.Namespace):
+def handle_dse_job(runner: Runner, args: argparse.Namespace) -> int:
     registry = Registry()
 
     original_test_runs = copy.deepcopy(runner.runner.test_scenario.test_runs)
 
+    has_dependencies = any(tr.dependencies for tr in runner.runner.test_scenario.test_runs)
+    if has_dependencies:
+        logging.error(
+            "Dependencies are not supported for DSE jobs, all cases run consecutively. "
+            "Please remove dependencies and re-run."
+        )
+        return 1
+
+    err = 0
     for tr in runner.runner.test_scenario.test_runs:
         test_run = copy.deepcopy(tr)
-        env = CloudAIGymEnv(test_run=test_run, runner=runner)
-        agent_type = test_run.test.test_definition.agent
 
+        agent_type = test_run.test.test_definition.agent
         agent_class = registry.agents_map.get(agent_type)
         if agent_class is None:
             logging.error(
                 f"No agent available for type: {agent_type}. Please make sure {agent_type} "
                 f"is a valid agent type. Available agents: {registry.agents_map.keys()}"
             )
+            err = 1
             continue
 
+        env = CloudAIGymEnv(test_run=test_run, runner=runner.runner)
         agent = agent_class(env)
         for step in range(agent.max_steps):
             result = agent.select_action()
@@ -148,6 +160,7 @@ def handle_dse_job(runner: Runner, args: argparse.Namespace):
         generate_reports(runner.runner.system, runner.runner.test_scenario, runner.runner.scenario_root)
 
     logging.info("All jobs are complete.")
+    return err
 
 
 def generate_reports(system: System, test_scenario: TestScenario, result_dir: Path) -> None:
@@ -156,7 +169,9 @@ def generate_reports(system: System, test_scenario: TestScenario, result_dir: Pa
         logging.debug(f"Generating report '{name}' ({reporter_class.__name__})")
 
         cfg = registry.report_configs.get(name, ReportConfig(enable=False))
-        if isinstance(system, SlurmSystem) and system.reports and name in system.reports:
+        if scenario_cfg := test_scenario.reports.get(name):
+            cfg = scenario_cfg
+        elif isinstance(system, SlurmSystem) and system.reports and name in system.reports:
             cfg = system.reports[name]
         logging.debug(f"Report '{name}' config is: {cfg.model_dump_json(indent=None)}")
 
@@ -169,7 +184,7 @@ def generate_reports(system: System, test_scenario: TestScenario, result_dir: Pa
             reporter.generate()
         except Exception as e:
             logging.warning(f"Error generating report '{name}', see debug log for details")
-            logging.debug(e, stack_info=True)
+            logging.debug(e, exc_info=True)
 
 
 def handle_non_dse_job(runner: Runner, args: argparse.Namespace) -> None:
@@ -195,9 +210,15 @@ def register_signal_handlers(signal_handler: Callable) -> None:
         signal.signal(sig, signal_handler)
 
 
-def handle_dry_run_and_run(args: argparse.Namespace) -> int:
+def _setup_system_and_scenario(
+    args: argparse.Namespace,
+) -> tuple[Optional[System], Optional[TestScenario], Optional[list[Test]]]:
     parser = Parser(args.system_config)
-    system, tests, test_scenario = parser.parse(args.tests_dir, args.test_scenario)
+    try:
+        system, tests, test_scenario = parser.parse(args.tests_dir, args.test_scenario)
+    except MissingTestError as e:
+        logging.error(e.message)
+        return None, None, None
 
     assert test_scenario is not None
 
@@ -205,24 +226,31 @@ def handle_dry_run_and_run(args: argparse.Namespace) -> int:
         system.output_path = args.output_dir.absolute()
 
     if not prepare_output_dir(system.output_path):
-        return 1
+        return None, None, None
+
     if args.mode == "dry-run":
         system.monitor_interval = 1
     system.update()
 
-    if args.single_sbatch:
-        if not isinstance(system, SlurmSystem):
-            logging.error("Single sbatch is only supported for Slurm systems.")
-            return 1
+    return system, test_scenario, tests
 
-        Registry().update_runner("slurm", SingleSbatchRunner)
 
-    logging.info(f"System Name: {system.name}")
-    logging.info(f"Scheduler: {system.scheduler}")
-    logging.info(f"Test Scenario Name: {test_scenario.name}")
+def _handle_single_sbatch(args: argparse.Namespace, system: System) -> bool:
+    if not args.single_sbatch:
+        return True
 
-    logging.info("Checking if test templates are installed.")
+    if not isinstance(system, SlurmSystem):
+        logging.error("Single sbatch is only supported for Slurm systems.")
+        return False
 
+    Registry().update_runner("slurm", SingleSbatchRunner)
+    return True
+
+
+def _check_installation(
+    args: argparse.Namespace, system: System, tests: list[Test], test_scenario: TestScenario
+) -> InstallStatusResult:
+    logging.info("Checking if workloads components are installed.")
     installables, installer = prepare_installation(system, tests, test_scenario)
 
     if args.enable_cache_without_check:
@@ -230,10 +258,38 @@ def handle_dry_run_and_run(args: argparse.Namespace) -> int:
     else:
         result = installer.is_installed(installables)
 
-    if args.mode == "run" and not result.success:
-        logging.error("CloudAI has not been installed. Please run install mode first.")
-        logging.error(result.message)
+    return result
+
+
+def handle_dry_run_and_run(args: argparse.Namespace) -> int:
+    setup_result = _setup_system_and_scenario(args)
+    if setup_result == (None, None, None):
         return 1
+
+    system, test_scenario, tests = setup_result
+    assert system is not None
+    assert test_scenario is not None
+    assert tests is not None
+
+    if not _handle_single_sbatch(args, system):
+        return 1
+
+    logging.info(f"System Name: {system.name}")
+    logging.info(f"Scheduler: {system.scheduler}")
+    logging.info(f"Test Scenario Name: {test_scenario.name}")
+
+    result = _check_installation(args, system, tests, test_scenario)
+    if args.mode == "run" and not result.success:
+        logging.info("Not all workloads components are installed. Installing...")
+        installables, installer = prepare_installation(system, tests, test_scenario)
+
+        result = installer.install(installables)
+        if result.success:
+            logging.info(f"CloudAI is successfully installed into '{system.install_path.absolute()}'.")
+        else:
+            logging.error("Failed to install workloads components.")
+            logging.error(result.message)
+            return 1
 
     logging.info(test_scenario.pretty_print())
 
@@ -246,12 +302,10 @@ def handle_dry_run_and_run(args: argparse.Namespace) -> int:
         return 0
 
     if all(tr.is_dse_job for tr in test_scenario.test_runs):
-        handle_dse_job(runner, args)
-    else:
-        logging.error("Mixing DSE and non-DSE jobs is not allowed.")
-        return 1
+        return handle_dse_job(runner, args)
 
-    return 0
+    logging.error("Mixing DSE and non-DSE jobs is not allowed.")
+    return 1
 
 
 def handle_generate_report(args: argparse.Namespace) -> int:
@@ -366,16 +420,15 @@ def verify_system_configs(system_tomls: List[Path]) -> int:
     return nfailed
 
 
-def verify_test_configs(test_tomls: List[Path], strict: bool) -> int:
+def verify_test_configs(test_tomls: List[Path]) -> int:
     nfailed = 0
     tp = TestParser([], None)  # type: ignore
-    logging.info(f"Strict test verification: {strict}")
     for test_toml in test_tomls:
         logging.debug(f"Verifying Test: {test_toml}...")
         try:
             with test_toml.open() as fh:
                 tp.current_file = test_toml
-                tp.load_test_definition(toml.load(fh), strict)
+                tp.load_test_definition(toml.load(fh))
         except Exception:
             nfailed += 1
 
@@ -388,11 +441,7 @@ def verify_test_configs(test_tomls: List[Path], strict: bool) -> int:
 
 
 def verify_test_scenarios(
-    scenario_tomls: List[Path],
-    test_tomls: list[Path],
-    hook_tomls: List[Path],
-    hook_test_tomls: list[Path],
-    strict: bool = False,
+    scenario_tomls: List[Path], test_tomls: list[Path], hook_tomls: List[Path], hook_test_tomls: list[Path]
 ) -> int:
     system = Mock(spec=System)
     nfailed = 0
@@ -402,7 +451,7 @@ def verify_test_scenarios(
             tests = Parser.parse_tests(test_tomls, system)
             hook_tests = Parser.parse_tests(hook_test_tomls, system)
             hooks = Parser.parse_hooks(hook_tomls, system, {t.name: t for t in hook_tests})
-            Parser.parse_test_scenario(scenario_file, system, {t.name: t for t in tests}, hooks, strict)
+            Parser.parse_test_scenario(scenario_file, system, {t.name: t for t in tests}, hooks)
         except Exception:
             nfailed += 1
 
@@ -438,9 +487,9 @@ def handle_verify_all_configs(args: argparse.Namespace) -> int:
     if files["system"]:
         nfailed += verify_system_configs(files["system"])
     if files["test"]:
-        nfailed += verify_test_configs(files["test"], args.strict)
+        nfailed += verify_test_configs(files["test"])
     if files["scenario"]:
-        nfailed += verify_test_scenarios(files["scenario"], test_tomls, files["hook"], files["hook_test"], args.strict)
+        nfailed += verify_test_scenarios(files["scenario"], test_tomls, files["hook"], files["hook_test"])
     if files["unknown"]:
         logging.error(f"Unknown configuration files: {[str(f) for f in files['unknown']]}")
         nfailed += len(files["unknown"])

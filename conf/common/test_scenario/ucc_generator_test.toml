@@ -18,7 +18,7 @@
 name = "ucc_generator_perftest"
 
 [[Tests]]
-id = "Tests.alltoallv"
+id = "Tests.alltoallv_file"
 num_nodes = 2
 time_limit = "00:02:00"
 
@@ -36,7 +36,7 @@ extra_container_mounts = [
 
 
 [[Tests]]
-id = "Tests.alltoallv"
+id = "Tests.alltoallv_matrix"
 num_nodes = 2
 time_limit = "00:02:00"
 
@@ -45,6 +45,6 @@ description = "UCC alltoallv matrix"
 test_template_name = "UCCTest"
 
   [Tests.cmd_args]
-  docker_image_url = "gitlab-master.nvidia.com:5005/yyacobovich/my_containers:pytorch_25-11_ucc_master"
+  docker_image_url = "gitlab-master.nvidia.com/yyacobovich/my_containers:pytorch_25-11_ucc_master"
   collective = "alltoallv"
   gen = "matrix:kind=1"
